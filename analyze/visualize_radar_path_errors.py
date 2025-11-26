@@ -181,6 +181,8 @@ def generate_averaged_config_plot(results_dir, output_dir):
     plt.tight_layout()
     
     output_base = output_dir / 'radar_path_errors_averaged_configs'
+    print(config_averaged_data)
+    print("Labels: ", metric_types)
     plt.savefig(f'{output_base}.pdf', dpi=300, bbox_inches='tight', format='pdf')
     plt.savefig(f'{output_base}.png', dpi=300, bbox_inches='tight')
     print(f"Averaged configuration plot saved: {output_base}.pdf and {output_base}.png")

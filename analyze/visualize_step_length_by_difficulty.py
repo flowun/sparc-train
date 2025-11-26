@@ -11,6 +11,7 @@ import numpy as np
 from pathlib import Path
 import sys
 import re
+import json
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
@@ -30,6 +31,44 @@ def parse_step_by_step_difficulty_file(filepath):
         difficulty_data[int(difficulty)] = float(avg_steps)
     
     return difficulty_data
+
+def get_optimal_solution_stats(filepath):
+    """
+    Extract optimal path lengths from a JSONL file.
+    
+    Args:
+        filepath: Path to a JSONL file containing puzzle definitions
+        
+    Returns:
+        Dict mapping difficulty level to average optimal path length
+    """
+    difficulty_lengths = {1: [], 2: [], 3: [], 4: [], 5: []}
+    
+    with open(filepath, 'r') as f:
+        for line in f:
+            try:
+                data = json.loads(line)
+                difficulty = data.get('difficulty_level')
+                solutions = data.get('solutions', [])
+                
+                if difficulty in difficulty_lengths and solutions:
+                    # Use the length of the first solution as the optimal length
+                    # (Usually the provided solutions are optimal or reference)
+                    path_length = solutions[0].get('pathLength')
+                    if path_length is not None:
+                        difficulty_lengths[difficulty].append(path_length)
+            except json.JSONDecodeError:
+                continue
+                
+    # Calculate averages
+    avg_optimal_lengths = {}
+    for diff, lengths in difficulty_lengths.items():
+        if lengths:
+            avg_optimal_lengths[diff] = np.mean(lengths)
+        else:
+            avg_optimal_lengths[diff] = None
+            
+    return avg_optimal_lengths
 
 def calculate_average_by_difficulty(results_dir, model_sizes, file_pattern):
     """
@@ -112,6 +151,17 @@ def create_step_length_by_difficulty_chart():
         for diff, values in step_by_step_by_difficulty.items()
     }
     
+    # Real Solution (Optimal)
+    # Use one of the JSONL files to get the ground truth path lengths
+    # (Puzzle definitions are the same across all result files)
+    optimal_data_source = results_dir / 'Qwen_Qwen3-0.6B.jsonl'
+    if optimal_data_source.exists():
+        print(f"Calculating optimal solution lengths from {optimal_data_source.name}...")
+        optimal_data = get_optimal_solution_stats(optimal_data_source)
+    else:
+        print(f"Warning: Could not find {optimal_data_source} for optimal solution stats")
+        optimal_data = {}
+    
     # Prepare data for plotting
     difficulties = [1, 2, 3, 4, 5]
     
@@ -119,38 +169,42 @@ def create_step_length_by_difficulty_chart():
     sft_values = [sft_data.get(d, np.nan) for d in difficulties]
     grpo_l_values = [grpo_l_data.get(d, np.nan) for d in difficulties]
     step_by_step_values = [step_by_step_data.get(d, np.nan) for d in difficulties]
+    optimal_values = [optimal_data.get(d, np.nan) for d in difficulties]
     
     # Print summary
     print("\n" + "="*80)
     print("AVERAGE PATH LENGTH BY DIFFICULTY (averaged across all model sizes)")
     print("="*80)
-    print(f"\n{'Difficulty':<12} {'Baseline':>12} {'SFT':>12} {'GRPO-L':>12} {'Step-by-step':>15}")
-    print("-" * 80)
+    print(f"\n{'Difficulty':<12} {'Baseline':>12} {'SFT':>12} {'GRPO-L':>12} {'Step-by-step':>15} {'Real Sol.':>12}")
+    print("-" * 92)
     
     for i, diff in enumerate(difficulties):
         print(f"{diff:<12} {baseline_values[i]:>12.2f} {sft_values[i]:>12.2f} "
-              f"{grpo_l_values[i]:>12.2f} {step_by_step_values[i]:>15.2f}")
+              f"{grpo_l_values[i]:>12.2f} {step_by_step_values[i]:>15.2f} {optimal_values[i]:>12.2f}")
     
     # Create figure
     fig, ax = plt.subplots(figsize=(COLUMN_WIDTH_INCHES, COLUMN_WIDTH_INCHES))
     
     # Bar chart configuration
     x = np.arange(len(difficulties))  # Label locations
-    width = 0.2  # Width of each bar
+    width = 0.15  # Width of each bar (made smaller to fit 5 bars)
     
     # Create grouped bars with consistent colors from plot_config
-    bars1 = ax.bar(x - 1.5*width, baseline_values, width, 
+    bars1 = ax.bar(x - 2.0*width, baseline_values, width, 
                    label='Baseline', color=get_training_method_color('Baseline'), 
                    edgecolor='black', linewidth=0.5)
-    bars2 = ax.bar(x - 0.5*width, sft_values, width, 
+    bars2 = ax.bar(x - 1.0*width, sft_values, width, 
                    label='SFT', color=get_training_method_color('SFT'), 
                    edgecolor='black', linewidth=0.5)
-    bars3 = ax.bar(x + 0.5*width, grpo_l_values, width, 
+    bars3 = ax.bar(x + 0.0*width, grpo_l_values, width, 
                    label='GRPO', color=get_training_method_color('GRPO'), 
                    edgecolor='black', linewidth=0.5)
-    bars4 = ax.bar(x + 1.5*width, step_by_step_values, width, 
+    bars4 = ax.bar(x + 1.0*width, step_by_step_values, width, 
                    label='Step-by-step', color=get_training_method_color('Step-by-step'), 
                    edgecolor='black', linewidth=0.5)
+    bars5 = ax.bar(x + 2.0*width, optimal_values, width,
+                   label='Real Solution', color='#666666',  # Grey for reference
+                   edgecolor='black', linewidth=0.5, hatch='//')
     
     # Customize axes
     ax.set_xlabel('Difficulty Level', fontsize=10)
