@@ -7,6 +7,7 @@ import wandb
 from accelerate import PartialState
 from datasets import load_dataset, Dataset
 from trl import GRPOConfig, GRPOTrainer
+from transformers import AutoTokenizer
 
 from sparc.prompt import generate_prompt
 from sparc.validation import extract_solution_path, validate_solution, analyze_path
@@ -176,9 +177,11 @@ def build_sparc_reward_functions(original_examples: List[Dict[str, Any]]):
     ]
 
 
-def to_grpo_prompt_format(dataset: Dataset) -> Dataset:
+def to_grpo_prompt_format(dataset: Dataset, tokenizer: AutoTokenizer, max_prompt_length: int = 5000) -> Dataset:
     def _map_fn(ex):
         prompt = generate_prompt(ex).strip()
+        token_ids = tokenizer.encode(prompt, add_special_tokens=False, truncation=True, max_length=max_prompt_length)
+        prompt = tokenizer.decode(token_ids, skip_special_tokens=True)
         system_msg = (
             "Use <think>...</think> to reason privately. Keep thinking concise. "
             "After thinking, output ONLY the final SPaRC path in the exact format '####(x0,y0)->(x1,y1)->...'. "
@@ -228,10 +231,11 @@ def main():
     # Load datasets
     train_raw = load_dataset("lkaesberg/SPaRC", "all", split="train")
     eval_raw = load_dataset("lkaesberg/SPaRC", "all", split="test[:100]")
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
 
     # Transform to prompt format
-    train_ds = to_grpo_prompt_format(train_raw)
-    eval_ds = to_grpo_prompt_format(eval_raw)
+    train_ds = to_grpo_prompt_format(train_raw, tokenizer)
+    eval_ds = to_grpo_prompt_format(eval_raw, tokenizer)
 
     # Build reward functions with access to original examples
     combined_examples: List[Dict[str, Any]] = list(train_raw) + list(eval_raw)
@@ -254,7 +258,6 @@ def main():
         vllm_server_timeout=3600,
         gradient_checkpointing=True,
         max_completion_length=10000, 
-        max_prompt_length=5000,
         num_generations=4,
         num_train_epochs=4,
         # Built-in weighting of multiple reward functions
@@ -282,5 +285,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
