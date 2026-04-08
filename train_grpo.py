@@ -58,10 +58,10 @@ def build_sparc_reward_functions(original_examples: List[Dict[str, Any]], use_vi
             try:
                 prompt_content = next(
                     (m.get("content", "") for m in prompt if isinstance(m, dict) and m.get("role") == "user"),
-                    prompt[0].get("content", ""),
+                    prompt[0].get("content", str(prompt)),
                 )
             except Exception:
-                prompt_content = prompt[0].get("content", "")
+                prompt_content = prompt[0].get("content", str(prompt))
             prompt_text_local = _extract_text_content(prompt_content)
         else:
             prompt_text_local = str(prompt)
@@ -277,6 +277,8 @@ def main():
     train_raw = load_dataset("lkaesberg/SPaRC", "all", split="train")
     eval_raw = load_dataset("lkaesberg/SPaRC", "all", split="test[:100]")
     processing_class = AutoProcessor.from_pretrained(args.model) if args.use_vision_variant else None
+    if args.use_vision_variant and not hasattr(processing_class, "tokenizer"):
+        raise ValueError("Vision variant requires an AutoProcessor with a tokenizer for prompt truncation.")
     tokenizer = (
         processing_class.tokenizer
         if args.use_vision_variant and hasattr(processing_class, "tokenizer")
