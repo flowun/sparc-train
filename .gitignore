@@ -8,3 +8,5 @@ logs_grpo
 logs_sft
 logs_ppo
 models
+__pycache__/
+*.pyc
