@@ -277,11 +277,11 @@ def main():
     train_raw = load_dataset("lkaesberg/SPaRC", "all", split="train")
     eval_raw = load_dataset("lkaesberg/SPaRC", "all", split="test[:100]")
     processing_class = AutoProcessor.from_pretrained(args.model) if args.use_vision_variant else None
-    if args.use_vision_variant and not hasattr(processing_class, "tokenizer"):
+    if args.use_vision_variant and (processing_class is None or not hasattr(processing_class, "tokenizer")):
         raise ValueError("Vision variant requires an AutoProcessor with a tokenizer for prompt truncation.")
     tokenizer = (
         processing_class.tokenizer
-        if args.use_vision_variant and hasattr(processing_class, "tokenizer")
+        if args.use_vision_variant and processing_class is not None and hasattr(processing_class, "tokenizer")
         else AutoTokenizer.from_pretrained(args.model)
     )
 
