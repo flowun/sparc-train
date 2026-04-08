@@ -40,6 +40,14 @@ echo "$CONDA_PREFIX"
 MODEL_NAME=${MODEL_NAME:-lkaesberg/Qwen3-32B-SPaRC-GRPO}
 echo "Model: ${MODEL_NAME}"
 RUN_NAME_ADDITION=${RUN_NAME_ADDITION:-"8epoch"}
+USE_VISION=${USE_VISION:-False}
+
+USE_VISION_NORM=$(echo "${USE_VISION}" | tr '[:upper:]' '[:lower:]')
+USE_VISION_ARG=""
+if [[ "${USE_VISION_NORM}" == "1" || "${USE_VISION_NORM}" == "true" || "${USE_VISION_NORM}" == "yes" ]]; then
+  USE_VISION_ARG="--use_vision_variant"
+fi
+echo "Use vision variant: ${USE_VISION} (${USE_VISION_ARG:-disabled})"
 
 # Discover allocated hosts
 NODELIST=( $(scontrol show hostnames ${SLURM_JOB_NODELIST}) )
@@ -115,4 +123,5 @@ srun --export=ALL --nodes=${NUM_MACHINES} --ntasks=${NUM_MACHINES} --nodelist="$
         --wandb_project sparc-grpo \
 	--wandb_entity "${WANDB_ENTITY}" \
         --run_name_addition ${RUN_NAME_ADDITION} \
+        ${USE_VISION_ARG} \
   "
