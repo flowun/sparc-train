@@ -279,11 +279,7 @@ def main():
     processing_class = AutoProcessor.from_pretrained(args.model) if args.use_vision_variant else None
     if args.use_vision_variant and (processing_class is None or not hasattr(processing_class, "tokenizer")):
         raise ValueError("Vision variant requires an AutoProcessor with a tokenizer for prompt truncation.")
-    tokenizer = (
-        processing_class.tokenizer
-        if args.use_vision_variant and processing_class is not None and hasattr(processing_class, "tokenizer")
-        else AutoTokenizer.from_pretrained(args.model)
-    )
+    tokenizer = processing_class.tokenizer if args.use_vision_variant else AutoTokenizer.from_pretrained(args.model)
 
     # Transform to prompt format
     train_ds = to_grpo_prompt_format(train_raw, tokenizer, use_vision_variant=args.use_vision_variant)
