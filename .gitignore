@@ -10,3 +10,4 @@ logs_ppo
 models
 __pycache__/
 *.pyc
+.idea

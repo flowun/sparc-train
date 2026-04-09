@@ -41,6 +41,7 @@ MODEL_NAME=${MODEL_NAME:-lkaesberg/Qwen3-32B-SPaRC-GRPO}
 echo "Model: ${MODEL_NAME}"
 RUN_NAME_ADDITION=${RUN_NAME_ADDITION:-"8epoch"}
 USE_VISION=${USE_VISION:-False}
+VISION_PLOT_TYPE=${VISION_PLOT_TYPE:-"original"}  # options: original, path_cell_annotated, text, etc.
 
 USE_VISION_NORM=$(echo "${USE_VISION}" | tr '[:upper:]' '[:lower:]')
 USE_VISION_ARG=""
@@ -48,6 +49,7 @@ if [[ "${USE_VISION_NORM}" == "1" || "${USE_VISION_NORM}" == "true" || "${USE_VI
   USE_VISION_ARG="--use_vision_variant"
 fi
 echo "Use vision variant: ${USE_VISION} (${USE_VISION_ARG:-disabled})"
+echo "Vision plot type: ${VISION_PLOT_TYPE}"
 
 # Discover allocated hosts
 NODELIST=( $(scontrol show hostnames ${SLURM_JOB_NODELIST}) )
@@ -123,5 +125,6 @@ srun --export=ALL --nodes=${NUM_MACHINES} --ntasks=${NUM_MACHINES} --nodelist="$
         --wandb_project sparc-grpo \
 	--wandb_entity "${WANDB_ENTITY}" \
         --run_name_addition ${RUN_NAME_ADDITION} \
+        --vision_plot_type ${VISION_PLOT_TYPE} \
         ${USE_VISION_ARG} \
   "

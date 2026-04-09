@@ -15,11 +15,15 @@ from sparc_visualization.prompt import generate_prompt as generate_visual_prompt
 from sparc.validation import extract_solution_path, validate_solution, analyze_path
 
 
-def _build_prompt_text(example: Dict[str, Any], use_vision_variant: bool) -> str:
+def _build_prompt_text(
+    example: Dict[str, Any],
+    use_vision_variant: bool,
+    vision_plot_type: str = "original",
+) -> str:
     if use_vision_variant:
         return generate_visual_prompt(
             example,
-            plot_type="path_cell_annotated",
+            plot_type=vision_plot_type,
             prompt_type="prompt_engineering",
         ).strip()
     return generate_text_prompt(example).strip()
@@ -40,14 +44,22 @@ def _extract_text_content(content: Any) -> str:
     return str(content)
 
 
-def build_sparc_reward_functions(original_examples: List[Dict[str, Any]], use_vision_variant: bool = False):
+def build_sparc_reward_functions(
+    original_examples: List[Dict[str, Any]],
+    use_vision_variant: bool = False,
+    vision_plot_type: str = "original",
+):
     """Builds a list of reward functions, one per reward component.
 
     Returns a list[callable], each taking (completions, prompts, **kwargs) -> list[float].
     """
     prompt_to_puzzle: Dict[str, Dict[str, Any]] = {}
     for example in original_examples:
-        prompt_text = _build_prompt_text(example, use_vision_variant=use_vision_variant)
+        prompt_text = _build_prompt_text(
+            example,
+            use_vision_variant=use_vision_variant,
+            vision_plot_type=vision_plot_type,
+        )
         prompt_to_puzzle[prompt_text] = example
 
     is_main = PartialState().is_main_process
@@ -210,9 +222,14 @@ def to_grpo_prompt_format(
     tokenizer: AutoTokenizer,
     max_prompt_length: int = 5000,
     use_vision_variant: bool = False,
+    vision_plot_type: str = "original",
 ) -> Dataset:
     def _map_fn(ex):
-        prompt = _build_prompt_text(ex, use_vision_variant=use_vision_variant)
+        prompt = _build_prompt_text(
+            ex,
+            use_vision_variant=use_vision_variant,
+            vision_plot_type=vision_plot_type,
+        )
         token_ids = tokenizer.encode(prompt, add_special_tokens=False, truncation=True, max_length=max_prompt_length)
         prompt = tokenizer.decode(token_ids, skip_special_tokens=True)
         system_msg = (
@@ -230,7 +247,7 @@ def to_grpo_prompt_format(
         if use_vision_variant:
             out["image"] = get_puzzle_image(
                 ex,
-                plot_type="path_cell_annotated",
+                plot_type=vision_plot_type,
                 base_64_image=False,
             )
         return out
@@ -247,6 +264,7 @@ def main():
     parser.add_argument("--wandb_run_id", type=str, default=None, help="Optional W&B run id to resume")
     parser.add_argument("--run_name_addition", type=str, default=os.environ.get("RUN_NAME_ADDITION", ""), help="Optional suffix to append to run/model name")
     parser.add_argument("--use_vision_variant", action="store_true", help="Use visual prompts/images for vision-language models")
+    parser.add_argument("--vision_plot_type", type=str, default="original", help="Plot type used to render vision prompts/images")
     args = parser.parse_args()
 
     state = PartialState()
@@ -267,7 +285,7 @@ def main():
             "vllm_mode": "server",
             "vllm_server_host": args.vllm_server_host,
             "use_vision_variant": args.use_vision_variant,
-            "vision_plot_type": "path_cell_annotated" if args.use_vision_variant else None,
+            "vision_plot_type": args.vision_plot_type if args.use_vision_variant else None,
             "vision_prompt_type": "prompt_engineering" if args.use_vision_variant else None,
         },
             settings=wandb.Settings(init_timeout=3600)
@@ -282,12 +300,26 @@ def main():
     tokenizer = processing_class.tokenizer if args.use_vision_variant else AutoTokenizer.from_pretrained(args.model)
 
     # Transform to prompt format
-    train_ds = to_grpo_prompt_format(train_raw, tokenizer, use_vision_variant=args.use_vision_variant)
-    eval_ds = to_grpo_prompt_format(eval_raw, tokenizer, use_vision_variant=args.use_vision_variant)
+    train_ds = to_grpo_prompt_format(
+        train_raw,
+        tokenizer,
+        use_vision_variant=args.use_vision_variant,
+        vision_plot_type=args.vision_plot_type,
+    )
+    eval_ds = to_grpo_prompt_format(
+        eval_raw,
+        tokenizer,
+        use_vision_variant=args.use_vision_variant,
+        vision_plot_type=args.vision_plot_type,
+    )
 
     # Build reward functions with access to original examples
     combined_examples: List[Dict[str, Any]] = list(train_raw) + list(eval_raw)
-    rewards = build_sparc_reward_functions(combined_examples, use_vision_variant=args.use_vision_variant)
+    rewards = build_sparc_reward_functions(
+        combined_examples,
+        use_vision_variant=args.use_vision_variant,
+        vision_plot_type=args.vision_plot_type,
+    )
 
     # Minimal GRPO config per docs; vLLM in server mode
     config = GRPOConfig(
