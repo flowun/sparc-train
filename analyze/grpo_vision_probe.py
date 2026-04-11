@@ -2,14 +2,20 @@
 import argparse
 import json
 import random
+import statistics
 import traceback
 import types
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional
 
+TRACEBACK_LIMIT = 5
+# Mirrors train_grpo.py reward order:
+# perfect, starts/ends, connected, non-intersecting, no-rule-crossing, format-hint.
+DEFAULT_BASE_REWARD_WEIGHTS = [1.0, 0.1, 0.1, 0.1, 0.1, 0.01]
+
 try:
     import torch
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
     torch = None
 
 def set_seed(seed: int) -> None:
@@ -18,7 +24,7 @@ def set_seed(seed: int) -> None:
         import numpy as np
 
         np.random.seed(seed)
-    except Exception:
+    except ImportError:
         pass
     if torch is not None:
         torch.manual_seed(seed)
@@ -48,6 +54,7 @@ def _find_image_keys(obj: Any, found: Optional[set] = None) -> set:
 
 @dataclass
 class RunProbeResult:
+    """Single probe run outcome with instrumentation from dataset, generation, processor, and rewards."""
     mode: str
     success: bool
     error: Optional[str]
@@ -72,8 +79,8 @@ def mutate_image_column(dataset, mode: str):
 
     if mode == "broken":
         def _break(ex, idx):
-            if idx == 0:
-                ex["image"] = "__BROKEN_IMAGE_OBJECT__"
+            _ = idx
+            ex["image"] = "__BROKEN_IMAGE_OBJECT__"
             return ex
 
         return dataset.map(_break, with_indices=True)
@@ -140,9 +147,19 @@ def run_probe(
 
     original_processor_call = processor.__call__
 
+    def _contains_images_arg(args, kwargs) -> bool:
+        if kwargs.get("images") is not None:
+            return True
+        for arg in args:
+            if isinstance(arg, (list, tuple)) and arg and isinstance(arg[0], (bytes, bytearray)):
+                return True
+            if isinstance(arg, dict) and any(k in arg for k in ("images", "pixel_values", "image")):
+                return True
+        return False
+
     def wrapped_processor_call(self, *args, **kwargs):
         probe["processor_call_count"] += 1
-        if kwargs.get("images") is not None:
+        if _contains_images_arg(args, kwargs):
             probe["processor_calls_with_images"] += 1
         return original_processor_call(*args, **kwargs)
 
@@ -151,13 +168,13 @@ def run_probe(
     if hasattr(processor, "apply_chat_template"):
         original_apply_chat_template = processor.apply_chat_template
 
-        def wrapped_apply_chat_template(*args, **kwargs):
+        def wrapped_apply_chat_template(self, *args, **kwargs):
             probe["processor_chat_template_calls"] += 1
-            if kwargs.get("images") is not None:
+            if _contains_images_arg(args, kwargs):
                 probe["processor_chat_template_calls_with_images"] += 1
             return original_apply_chat_template(*args, **kwargs)
 
-        processor.apply_chat_template = wrapped_apply_chat_template
+        processor.apply_chat_template = types.MethodType(wrapped_apply_chat_template, processor)
 
     base_rewards = build_sparc_reward_functions(
         list(raw),
@@ -193,6 +210,12 @@ def run_probe(
 
     wrapped_rewards.append(probe_reward)
 
+    if len(base_rewards) <= len(DEFAULT_BASE_REWARD_WEIGHTS):
+        base_reward_weights = DEFAULT_BASE_REWARD_WEIGHTS[: len(base_rewards)]
+    else:
+        num_missing = len(base_rewards) - len(DEFAULT_BASE_REWARD_WEIGHTS)
+        tail_weight = DEFAULT_BASE_REWARD_WEIGHTS[-1]
+        base_reward_weights = DEFAULT_BASE_REWARD_WEIGHTS + [tail_weight] * num_missing
     config_kwargs = dict(
         output_dir=output_dir,
         report_to="none",
@@ -208,7 +231,8 @@ def run_probe(
         max_steps=1,
         num_generations=1,
         num_train_epochs=1,
-        reward_weights=[1.0, 0.1, 0.1, 0.1, 0.1, 0.01, 0.0],
+        # Base reward weights + probe reward weight (always zeroed).
+        reward_weights=base_reward_weights + [0.0],
         scale_rewards=False,
         loss_type="dr_grpo",
         gradient_checkpointing=False,
@@ -240,7 +264,7 @@ def run_probe(
     def wrapped_generate(self, *args, **kwargs):
         probe["generation_call_count"] += 1
         if probe["generation_first_input_type"] is None:
-            first = args[0] if args else kwargs
+            first = args[0] if args else kwargs.get("inputs", kwargs)
             probe["generation_first_input_type"] = type(first).__name__
             keys = sorted(list(_find_image_keys(first)))
             probe["generation_first_image_keys"] = keys
@@ -254,12 +278,16 @@ def run_probe(
         error = None
     except Exception as exc:
         success = False
-        error = f"{type(exc).__name__}: {exc}\n{traceback.format_exc(limit=5)}"
+        error = f"{type(exc).__name__}: {exc}\n{traceback.format_exc(limit=TRACEBACK_LIMIT)}"
 
     reward_means = []
     for i in range(len(base_rewards)):
         vals = probe["first_reward_values"].get(i)
-        reward_means.append(float(sum(vals) / len(vals)) if vals is not None and len(vals) > 0 else None)
+        if vals is None or len(vals) == 0:
+            reward_means.append(None)
+            continue
+        numeric_vals = [float(v) for v in vals if isinstance(v, (int, float))]
+        reward_means.append(float(statistics.mean(numeric_vals)) if numeric_vals else None)
 
     return RunProbeResult(
         mode=mode,
@@ -295,9 +323,11 @@ def verdict(normal: RunProbeResult, broken: RunProbeResult, ab_cmp: Dict[str, An
     image_seen_generation = bool(normal.generation_first_image_keys)
     processor_used_images = normal.processor_calls_with_images > 0 or normal.processor_chat_template_calls_with_images > 0
     broken_failed = not broken.success
-    ab_different = bool(ab_cmp.get("ab_different", False))
+    ab_different = ab_cmp["ab_different"]
 
+    # "Used" requires all positive signals to line up.
     high_conf_used = image_seen_generation and processor_used_images and broken_failed and ab_different
+    # "Ignored" requires consistently negative signals across all probes.
     high_conf_ignored = (not image_seen_generation and not processor_used_images and not broken_failed and not ab_different)
 
     return {
