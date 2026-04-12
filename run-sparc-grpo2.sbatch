@@ -6,9 +6,9 @@
 ###############################################################################
 #SBATCH --job-name=sparc-grpo
 #SBATCH --partition=scc-gpu
-#SBATCH --time=24:00:00         # 48:00:00
+#SBATCH --time=48:00:00         # 48:00:00
 #SBATCH --mem=256G
-#SBATCH --nodes=4
+#SBATCH --nodes=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:A100:4       # 4 GPUs per node
 #SBATCH -c 32
@@ -20,7 +20,8 @@ module load gcc/13.2.0
 module load cuda/12.6.2
 
 module load miniforge3
-CONDA_ENV_PATH="${CONDA_ENVS_PATH:+$CONDA_ENVS_PATH/}vllm"
+CONDA_ENV_NAME=${CONDA_ENV_NAME:-vllm}
+CONDA_ENV_PATH="${CONDA_ENVS_PATH:+$CONDA_ENVS_PATH/}${CONDA_ENV_NAME}"
 # Export conda path
 export CONDA_ENV_PATH
 
@@ -47,6 +48,7 @@ USE_VISION_NORM=$(echo "${USE_VISION}" | tr '[:upper:]' '[:lower:]')
 USE_VISION_ARG=""
 if [[ "${USE_VISION_NORM}" == "1" || "${USE_VISION_NORM}" == "true" || "${USE_VISION_NORM}" == "yes" ]]; then
   USE_VISION_ARG="--use_vision_variant"
+  RUN_NAME_ADDITION="${RUN_NAME_ADDITION}_${VISION_PLOT_TYPE}"
 fi
 echo "Use vision variant: ${USE_VISION} (${USE_VISION_ARG:-disabled})"
 echo "Vision plot type: ${VISION_PLOT_TYPE}"
