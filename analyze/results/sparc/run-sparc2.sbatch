@@ -71,14 +71,19 @@ if [[ -z "${VISION_PLOT_TYPE:-}" ]]; then
     *_original)           VISION_PLOT_TYPE="original" ;;
     *_path_cell_annotated) VISION_PLOT_TYPE="path_cell_annotated" ;;
     *_text)               VISION_PLOT_TYPE="text" ;;
-    *)                    VISION_PLOT_TYPE="original" ;;   # unknown suffix fallback
+    *)                    VISION_PLOT_TYPE="" ;;   # unknown suffix fallback to non vision variante
   esac
   PLOT_TYPE_SOURCE="inferred from model name"
 else
   PLOT_TYPE_SOURCE="overridden via VISION_PLOT_TYPE"
 fi
 
-VISUAL_ARGS=(--visual --plot-type "$VISION_PLOT_TYPE")
+if [ -n "$VISION_PLOT_TYPE" ]; then
+  VISUAL_ARGS=(--visual --plot-type "$VISION_PLOT_TYPE")
+else
+  VISUAL_ARGS=()
+  echo "No board puzzle visualization used (no image)."
+fi
 VISUAL_MODE="visual (plot-type=${VISION_PLOT_TYPE}, ${PLOT_TYPE_SOURCE})"
 
 echo "Model:        $MODEL"
