@@ -58,33 +58,28 @@ export HF_HOME
 mkdir -p "$HF_HOME" logs
 
 ###############################################################################
-# 2 · Infer visual mode from model name suffix
+# 2 · Infer visualization plot type from model name suffix
 #     Suffixes recognised: _original, _path_cell_annotated, _text
 #     VISION_PLOT_TYPE env var overrides inference.
+#     This script always runs sparc in visual mode.
 ###############################################################################
 MODEL_BASENAME="$(basename "$MODEL")"
 
-# Infer from suffix when VISION_PLOT_TYPE is not already set
+# Infer plot type from suffix when VISION_PLOT_TYPE is not already set
 if [[ -z "${VISION_PLOT_TYPE:-}" ]]; then
   case "$MODEL_BASENAME" in
     *_original)           VISION_PLOT_TYPE="original" ;;
     *_path_cell_annotated) VISION_PLOT_TYPE="path_cell_annotated" ;;
-    *_text)               VISION_PLOT_TYPE="" ;;   # text-only, no visual
-    *)                    VISION_PLOT_TYPE="" ;;   # unknown suffix – default text
+    *_text)               VISION_PLOT_TYPE="cell_annotated" ;;
+    *)                    VISION_PLOT_TYPE="original" ;;   # unknown suffix fallback
   esac
   PLOT_TYPE_SOURCE="inferred from model name"
 else
   PLOT_TYPE_SOURCE="overridden via VISION_PLOT_TYPE"
 fi
 
-# Decide whether to enable --visual flag
-if [[ -n "${VISION_PLOT_TYPE}" ]]; then
-  VISUAL_ARGS="--visual --plot-type ${VISION_PLOT_TYPE}"
-  VISUAL_MODE="visual (plot-type=${VISION_PLOT_TYPE}, ${PLOT_TYPE_SOURCE})"
-else
-  VISUAL_ARGS=""
-  VISUAL_MODE="text-only (${PLOT_TYPE_SOURCE})"
-fi
+VISUAL_ARGS=(--visual --plot-type "$VISION_PLOT_TYPE")
+VISUAL_MODE="visual (plot-type=${VISION_PLOT_TYPE}, ${PLOT_TYPE_SOURCE})"
 
 echo "Model:        $MODEL"
 echo "Port:         $PORT | TP size: $TP_SIZE | HF_HOME: $HF_HOME"
@@ -158,12 +153,11 @@ export OPENAI_API_BASE="http://127.0.0.1:${PORT}/v1"
 export OPENAI_API_KEY="${OPENAI_API_KEY:-LOCALHOST_ONLY}"
 
 echo "Running sparc client (visual mode: $VISUAL_MODE)..."
-# shellcheck disable=SC2086
 sparc --api-key "$OPENAI_API_KEY" \
       --base-url "$OPENAI_API_BASE" \
       --model "$MODEL" \
       --batch-size 20 \
-      $VISUAL_ARGS \
+      "${VISUAL_ARGS[@]}" \
       "$@"
 
 echo "[$(date +%F\ %T)] sparc finished — job complete."
