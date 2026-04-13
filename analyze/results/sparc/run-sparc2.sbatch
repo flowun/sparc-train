@@ -70,7 +70,7 @@ if [[ -z "${VISION_PLOT_TYPE:-}" ]]; then
   case "$MODEL_BASENAME" in
     *_original)           VISION_PLOT_TYPE="original" ;;
     *_path_cell_annotated) VISION_PLOT_TYPE="path_cell_annotated" ;;
-    *_text)               VISION_PLOT_TYPE="cell_annotated" ;;
+    *_text)               VISION_PLOT_TYPE="text" ;;
     *)                    VISION_PLOT_TYPE="original" ;;   # unknown suffix fallback
   esac
   PLOT_TYPE_SOURCE="inferred from model name"
