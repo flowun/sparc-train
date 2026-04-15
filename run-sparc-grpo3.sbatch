@@ -283,7 +283,7 @@ srun --export=ALL --nodes=${NUM_MACHINES} --ntasks=${NUM_MACHINES} --nodelist="$
         --model \"${MODEL_NAME}\" \
         --vllm_server_host ${VLLM_NODE} \
         --wandb_project sparc-grpo \
-	--wandb_entity "${WANDB_ENTITY}" \
+        --wandb_entity "${WANDB_ENTITY}" \
         --run_name_addition ${RUN_NAME_ADDITION} \
         --vision_plot_type ${VISION_PLOT_TYPE} \
         ${USE_VISION_ARG} \
