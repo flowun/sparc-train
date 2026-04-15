@@ -60,7 +60,7 @@ TOTAL_NODES=${#NODELIST[@]}
 # User-tunable knobs (with safe defaults)
 VLLM_NODE_COUNT=${VLLM_NODE_COUNT:-1}
 GPUS_PER_NODE=${GPUS_PER_NODE:-2}
-VLLM_TP_SIZE=${VLLM_TP_SIZE:-${GPUS_PER_NODE}}
+VLLM_TP_SIZE=${VLLM_TP_SIZE:-}
 
 # Optional GPU type parser hint (defaults to A100 from SBATCH --gres line)
 GPU_TYPE=${GPU_TYPE:-A100}
@@ -87,6 +87,9 @@ parse_gpu_count_from_field() {
   count=$(echo "${field}" | sed -nE "s/.*gpu:${gpu_type}:([0-9]+).*/\\1/p")
   if [[ -z "${count}" ]]; then
     count=$(echo "${field}" | sed -nE 's/.*gpu:[^:,]+:([0-9]+).*/\1/p')
+  fi
+  if [[ -z "${count}" ]]; then
+    count=$(echo "${field}" | sed -nE 's/.*gpu:([0-9]+).*/\1/p')
   fi
   if [[ -z "${count}" ]]; then
     count=0
@@ -132,6 +135,7 @@ rank_state_priority() {
   esac
 }
 
+declare -A NODE_FREE_GPU
 ranked_lines=()
 for node in "${NODELIST[@]}"; do
   state=$(parse_node_state "${node}")
@@ -142,6 +146,7 @@ for node in "${NODELIST[@]}"; do
     free_gpu=0
   fi
   priority=$(rank_state_priority "${state}")
+  NODE_FREE_GPU["${node}"]=${free_gpu}
   ranked_lines+=( "${priority} ${free_gpu} ${node}" )
 done
 
@@ -167,9 +172,69 @@ if (( TRAIN_NODES_COUNT < 1 )); then
   exit 1
 fi
 
-# Split nodes: first TRAIN_NODES_COUNT for training, next 1 for vLLM
-TRAIN_NODES=("${NODELIST[@]:0:${TRAIN_NODES_COUNT}}")
-VLLM_NODE="${NODELIST[$((TRAIN_NODES_COUNT))]}"
+if (( VLLM_NODE_COUNT != 1 )); then
+  echo "Error: run-sparc-grpo3.sbatch currently supports exactly one vLLM node (VLLM_NODE_COUNT=1)." >&2
+  exit 1
+fi
+
+# Split nodes: first 1 for vLLM, then TRAIN_NODES_COUNT for training
+VLLM_NODE="${NODELIST[0]}"
+TRAIN_NODES=("${NODELIST[@]:${VLLM_NODE_COUNT}:${TRAIN_NODES_COUNT}}")
+
+if (( ${#TRAIN_NODES[@]} != TRAIN_NODES_COUNT )); then
+  echo "Error: expected ${TRAIN_NODES_COUNT} training nodes, got ${#TRAIN_NODES[@]}." >&2
+  exit 1
+fi
+
+if (( GPUS_PER_NODE < 2 )); then
+  GPUS_PER_NODE=2
+fi
+
+MIN_ALLOCATED_TRAIN_GPU=999
+readarray -t TRAIN_GPU_INFO < <(
+  srun --export=ALL --nodes=${TRAIN_NODES_COUNT} --ntasks=${TRAIN_NODES_COUNT} --nodelist="${TRAIN_NODES[*]}" \
+    bash -lc 'echo "$(hostname) $(nvidia-smi -L | wc -l)"'
+)
+
+if (( ${#TRAIN_GPU_INFO[@]} == 0 )); then
+  echo "Error: could not determine allocated GPU counts on training nodes." >&2
+  exit 1
+fi
+
+for line in "${TRAIN_GPU_INFO[@]}"; do
+  node_gpu_count=$(echo "${line}" | awk '{print $2}')
+  if [[ -z "${node_gpu_count}" ]]; then
+    node_gpu_count=0
+  fi
+  if (( node_gpu_count < MIN_ALLOCATED_TRAIN_GPU )); then
+    MIN_ALLOCATED_TRAIN_GPU=${node_gpu_count}
+  fi
+done
+
+if (( MIN_ALLOCATED_TRAIN_GPU < 2 )); then
+  echo "Error: at least 2 GPUs are required on each training node, found minimum allocated ${MIN_ALLOCATED_TRAIN_GPU}." >&2
+  exit 1
+fi
+
+GPUS_PER_NODE=${MIN_ALLOCATED_TRAIN_GPU}
+
+VLLM_VISIBLE_GPU=$(srun --export=ALL --nodes=1 --ntasks=1 --nodelist=${VLLM_NODE} bash -lc 'nvidia-smi -L | wc -l')
+if [[ -z "${VLLM_VISIBLE_GPU}" ]]; then
+  VLLM_VISIBLE_GPU=0
+fi
+
+if (( VLLM_VISIBLE_GPU < 1 )); then
+  echo "Error: selected vLLM node ${VLLM_NODE} has no allocated/visible GPUs." >&2
+  exit 1
+fi
+
+if [[ -z "${VLLM_TP_SIZE}" ]]; then
+  if (( VLLM_VISIBLE_GPU < GPUS_PER_NODE )); then
+    VLLM_TP_SIZE=${VLLM_VISIBLE_GPU}
+  else
+    VLLM_TP_SIZE=${GPUS_PER_NODE}
+  fi
+fi
 
 # Derived distributed settings
 NUM_MACHINES=${TRAIN_NODES_COUNT}
