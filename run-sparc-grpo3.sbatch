@@ -34,7 +34,7 @@ echo "$CONDA_PREFIX"
 # Dynamic layout from a single TRAIN_NODE_COUNT (or derive from allocation)
 # - By default we use 1 node for vLLM and the rest for training
 # - You can override with env vars when submitting, e.g.:
-#     TRAIN_NODE_COUNT=2 GPUS_PER_NODE=4 sbatch -N 3 run-sparc-grpo-vllm-deep.sbatch
+#     TRAIN_NODE_COUNT=3 MIN_GPUS_PER_NODE=2 sbatch -N 4 run-sparc-grpo3.sbatch
 #   Ensure the SBATCH -N equals TRAIN_NODE_COUNT + VLLM_NODE_COUNT
 
 # Central model selection (override by exporting MODEL_NAME before sbatch)
@@ -59,7 +59,7 @@ TOTAL_NODES=${#NODELIST[@]}
 
 # User-tunable knobs (with safe defaults)
 VLLM_NODE_COUNT=${VLLM_NODE_COUNT:-1}
-GPUS_PER_NODE=${GPUS_PER_NODE:-2}
+MIN_GPUS_PER_NODE=${MIN_GPUS_PER_NODE:-2}
 VLLM_TP_SIZE=${VLLM_TP_SIZE:-}
 
 # Optional GPU type parser hint (defaults to A100 from SBATCH --gres line)
@@ -186,13 +186,15 @@ if (( ${#TRAIN_NODES[@]} != TRAIN_NODES_COUNT )); then
   exit 1
 fi
 
-if (( GPUS_PER_NODE < 2 )); then
-  GPUS_PER_NODE=2
+if (( MIN_GPUS_PER_NODE < 2 )); then
+  MIN_GPUS_PER_NODE=2
 fi
+
+TRAIN_NODELIST_CSV=$(IFS=,; echo "${TRAIN_NODES[*]}")
 
 MIN_ALLOCATED_TRAIN_GPU=999
 readarray -t TRAIN_GPU_INFO < <(
-  srun --export=ALL --nodes=${TRAIN_NODES_COUNT} --ntasks=${TRAIN_NODES_COUNT} --nodelist="${TRAIN_NODES[*]}" \
+  srun --export=ALL --nodes=${TRAIN_NODES_COUNT} --ntasks=${TRAIN_NODES_COUNT} --nodelist="${TRAIN_NODELIST_CSV}" \
     bash -lc 'echo "$(hostname) $(nvidia-smi -L | wc -l)"'
 )
 
@@ -211,8 +213,8 @@ for line in "${TRAIN_GPU_INFO[@]}"; do
   fi
 done
 
-if (( MIN_ALLOCATED_TRAIN_GPU < 2 )); then
-  echo "Error: at least 2 GPUs are required on each training node, found minimum allocated ${MIN_ALLOCATED_TRAIN_GPU}." >&2
+if (( MIN_ALLOCATED_TRAIN_GPU < MIN_GPUS_PER_NODE )); then
+  echo "Error: at least ${MIN_GPUS_PER_NODE} GPUs are required on each training node, found minimum allocated ${MIN_ALLOCATED_TRAIN_GPU}." >&2
   exit 1
 fi
 
@@ -264,7 +266,7 @@ srun --export=ALL --nodes=1 --ntasks=1 --nodelist=${VLLM_NODE} \
 sleep 30
 
 # Start distributed training across the training nodes
-srun --export=ALL --nodes=${NUM_MACHINES} --ntasks=${NUM_MACHINES} --nodelist="${TRAIN_NODES[*]}" \
+srun --export=ALL --nodes=${NUM_MACHINES} --ntasks=${NUM_MACHINES} --nodelist="${TRAIN_NODELIST_CSV}" \
   bash -lc "\
     module load gcc/13.2.0; \
     module load cuda/12.6.2; \
