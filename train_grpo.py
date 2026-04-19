@@ -17,8 +17,6 @@ from sparc_visualization.plot import get_puzzle_image
 from sparc_visualization.prompt import generate_prompt as generate_visual_prompt
 from sparc.validation import extract_solution_path, validate_solution, analyze_path
 
-logger = logging.getLogger(__name__)
-
 
 def _build_prompt_text(
     example: Dict[str, Any],
@@ -261,6 +259,7 @@ def to_grpo_prompt_format(
 
 
 def main():
+    logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="Qwen/Qwen3-0.6B")
     parser.add_argument("--vllm_server_host", type=str, required=True, help="Hostname or IP of the vLLM server (port 8000)")
@@ -270,7 +269,12 @@ def main():
     parser.add_argument("--run_name_addition", type=str, default=os.environ.get("RUN_NAME_ADDITION", ""), help="Optional suffix to append to run/model name")
     parser.add_argument("--use_vision_variant", action="store_true", help="Use visual prompts/images for vision-language models")
     parser.add_argument("--vision_plot_type", type=str, default="original", help="Plot type used to render vision prompts/images")
-    parser.add_argument("--checkpoint_steps", type=int, default=None, help="Optional step interval for checkpoint saving")
+    parser.add_argument(
+        "--checkpoint_steps",
+        type=int,
+        default=None,
+        help="Optional step interval for checkpoint saving (keeps only the latest checkpoint during training).",
+    )
     args = parser.parse_args()
 
     if args.checkpoint_steps is not None and args.checkpoint_steps <= 0:
@@ -384,9 +388,9 @@ def main():
                 try:
                     shutil.rmtree(checkpoint_dir)
                 except FileNotFoundError:
-                    logger.warning("Checkpoint directory disappeared before cleanup: '%s'", checkpoint_dir)
+                    logging.warning("Checkpoint directory not found during cleanup: '%s'", checkpoint_dir)
                 except OSError as exc:
-                    logger.warning("Failed to remove checkpoint directory '%s': %s", checkpoint_dir, exc)
+                    logging.warning("Failed to remove checkpoint directory '%s': %s", checkpoint_dir, exc)
     state.wait_for_everyone()
 
     if is_main:
