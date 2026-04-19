@@ -1,4 +1,5 @@
 import argparse
+import logging
 import os
 import shutil
 from pathlib import Path
@@ -15,6 +16,8 @@ from sparc.prompt import generate_prompt as generate_text_prompt
 from sparc_visualization.plot import get_puzzle_image
 from sparc_visualization.prompt import generate_prompt as generate_visual_prompt
 from sparc.validation import extract_solution_path, validate_solution, analyze_path
+
+logger = logging.getLogger(__name__)
 
 
 def _build_prompt_text(
@@ -378,7 +381,13 @@ def main():
     if is_main and args.checkpoint_steps is not None:
         for checkpoint_dir in Path(config.output_dir).glob("checkpoint-*"):
             if checkpoint_dir.is_dir():
-                shutil.rmtree(checkpoint_dir, ignore_errors=True)
+                try:
+                    shutil.rmtree(checkpoint_dir)
+                except FileNotFoundError:
+                    logger.warning("Checkpoint directory disappeared before cleanup: '%s'", checkpoint_dir)
+                except OSError as exc:
+                    logger.warning("Failed to remove checkpoint directory '%s': %s", checkpoint_dir, exc)
+    state.wait_for_everyone()
 
     if is_main:
         wandb.finish()

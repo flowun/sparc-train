@@ -74,10 +74,12 @@ fi
 echo "Use vision variant: ${USE_VISION} (${USE_VISION_ARG:-disabled})"
 echo "Vision plot type: ${VISION_PLOT_TYPE}"
 CHECKPOINT_ARGS=""
+CHECKPOINT_STATUS="disabled"
 if [[ -n "${CHECKPOINT_STEPS}" ]]; then
   CHECKPOINT_ARGS="--checkpoint_steps ${CHECKPOINT_STEPS}"
+  CHECKPOINT_STATUS="every ${CHECKPOINT_STEPS} steps"
 fi
-echo "Checkpointing: ${CHECKPOINT_STEPS:+every ${CHECKPOINT_STEPS} steps}${CHECKPOINT_STEPS:-disabled}"
+echo "Checkpointing: ${CHECKPOINT_STATUS}"
 
 # Discover allocated hosts
 NODELIST=( $(scontrol show hostnames ${SLURM_JOB_NODELIST}) )
