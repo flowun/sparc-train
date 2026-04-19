@@ -1,5 +1,7 @@
 import argparse
 import os
+import shutil
+from pathlib import Path
 from typing import List, Any, Dict
 import torch.distributed as dist
 
@@ -265,7 +267,11 @@ def main():
     parser.add_argument("--run_name_addition", type=str, default=os.environ.get("RUN_NAME_ADDITION", ""), help="Optional suffix to append to run/model name")
     parser.add_argument("--use_vision_variant", action="store_true", help="Use visual prompts/images for vision-language models")
     parser.add_argument("--vision_plot_type", type=str, default="original", help="Plot type used to render vision prompts/images")
+    parser.add_argument("--checkpoint_steps", type=int, default=None, help="Optional step interval for checkpoint saving")
     args = parser.parse_args()
+
+    if args.checkpoint_steps is not None and args.checkpoint_steps <= 0:
+        raise ValueError("--checkpoint_steps must be a positive integer when provided.")
 
     state = PartialState()
     is_main = state.is_main_process
@@ -287,6 +293,7 @@ def main():
             "use_vision_variant": args.use_vision_variant,
             "vision_plot_type": args.vision_plot_type if args.use_vision_variant else None,
             "vision_prompt_type": "prompt_engineering" if args.use_vision_variant else None,
+            "checkpoint_steps": args.checkpoint_steps,
         },
             settings=wandb.Settings(init_timeout=3600)
         )
@@ -322,7 +329,7 @@ def main():
     )
 
     # Minimal GRPO config per docs; vLLM in server mode
-    config = GRPOConfig(
+    config_kwargs = dict(
         output_dir=f"./checkpoints/grpo_outputs_{args.model.replace('/', '_')}",
         report_to="wandb",
         per_device_train_batch_size=1,
@@ -330,7 +337,6 @@ def main():
         gradient_accumulation_steps=1,
         bf16=True,
         logging_steps=10,
-        save_strategy="no",
         do_eval=False,
         use_vllm=True,
         vllm_mode="server",
@@ -345,6 +351,15 @@ def main():
         scale_rewards=False,
         loss_type="dr_grpo"
     )
+    if args.checkpoint_steps is not None:
+        config_kwargs.update(
+            save_strategy="steps",
+            save_steps=args.checkpoint_steps,
+            save_total_limit=1,
+        )
+    else:
+        config_kwargs.update(save_strategy="no")
+    config = GRPOConfig(**config_kwargs)
 
     trainer = GRPOTrainer(
         model=args.model,
@@ -359,6 +374,11 @@ def main():
     trainer.train(resume_from_checkpoint=bool(args.wandb_run_id))
 
     trainer.save_model(f"./models/{run_name}")
+    state.wait_for_everyone()
+    if is_main and args.checkpoint_steps is not None:
+        for checkpoint_dir in Path(config.output_dir).glob("checkpoint-*"):
+            if checkpoint_dir.is_dir():
+                shutil.rmtree(checkpoint_dir, ignore_errors=True)
 
     if is_main:
         wandb.finish()

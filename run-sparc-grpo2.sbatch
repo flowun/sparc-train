@@ -63,6 +63,7 @@ echo "Model: ${MODEL_NAME}"
 RUN_NAME_ADDITION=${RUN_NAME_ADDITION:-"8epoch"}
 USE_VISION=${USE_VISION:-False}
 VISION_PLOT_TYPE=${VISION_PLOT_TYPE:-"original"}  # options: original, path_cell_annotated, text, etc.
+CHECKPOINT_STEPS=${CHECKPOINT_STEPS:-}
 
 USE_VISION_NORM=$(echo "${USE_VISION}" | tr '[:upper:]' '[:lower:]')
 USE_VISION_ARG=""
@@ -72,6 +73,11 @@ if [[ "${USE_VISION_NORM}" == "1" || "${USE_VISION_NORM}" == "true" || "${USE_VI
 fi
 echo "Use vision variant: ${USE_VISION} (${USE_VISION_ARG:-disabled})"
 echo "Vision plot type: ${VISION_PLOT_TYPE}"
+CHECKPOINT_ARGS=""
+if [[ -n "${CHECKPOINT_STEPS}" ]]; then
+  CHECKPOINT_ARGS="--checkpoint_steps ${CHECKPOINT_STEPS}"
+fi
+echo "Checkpointing: ${CHECKPOINT_STEPS:+every ${CHECKPOINT_STEPS} steps}${CHECKPOINT_STEPS:-disabled}"
 
 # Discover allocated hosts
 NODELIST=( $(scontrol show hostnames ${SLURM_JOB_NODELIST}) )
@@ -149,4 +155,5 @@ srun --export=ALL --nodes=${NUM_MACHINES} --ntasks=${NUM_MACHINES} --nodelist="$
         --run_name_addition ${RUN_NAME_ADDITION} \
         --vision_plot_type ${VISION_PLOT_TYPE} \
         ${USE_VISION_ARG} \
+        ${CHECKPOINT_ARGS} \
   "
