@@ -8,7 +8,7 @@
 #SBATCH --partition=scc-gpu
 #SBATCH --time=48:00:00         # 48:00:00
 #SBATCH --mem=256G
-#SBATCH --nodes=2
+#SBATCH --nodes=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:A100:4       # 4 GPUs per node
 #SBATCH -c 32
@@ -18,6 +18,26 @@
 
 module load gcc/13.2.0
 module load cuda/12.6.2
+
+
+# Cache problem fix: new cache dir in every job
+export TMPDIR=${SLURM_TMPDIR:-/tmp/$USER/$SLURM_JOB_ID}
+
+export TRITON_CACHE_DIR=$TMPDIR/triton
+export TORCHINDUCTOR_CACHE_DIR=$TMPDIR/torchinductor
+export TORCH_EXTENSIONS_DIR=$TMPDIR/torch_extensions
+export VLLM_CACHE_ROOT=$TMPDIR/vllm
+export PIP_CACHE_DIR=$TMPDIR/pip
+export XDG_CACHE_HOME=$TMPDIR/xdg
+
+mkdir -p \
+  $TRITON_CACHE_DIR \
+  $TORCHINDUCTOR_CACHE_DIR \
+  $TORCH_EXTENSIONS_DIR \
+  $VLLM_CACHE_ROOT \
+  $PIP_CACHE_DIR \
+  $XDG_CACHE_HOME
+
 
 module load miniforge3
 CONDA_ENV_NAME=${CONDA_ENV_NAME:-vllm}
