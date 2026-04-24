@@ -34,6 +34,24 @@
 set -euo pipefail
 echo "[$(date +%F\ %T)] Job starting on $HOSTNAME"
 
+# new tmp cache dirs
+export TMPDIR=${SLURM_TMPDIR:-/tmp/$USER/$SLURM_JOB_ID}
+
+export TRITON_CACHE_DIR=$TMPDIR/triton
+export TORCHINDUCTOR_CACHE_DIR=$TMPDIR/torchinductor
+export TORCH_EXTENSIONS_DIR=$TMPDIR/torch_extensions
+export VLLM_CACHE_ROOT=$TMPDIR/vllm
+export PIP_CACHE_DIR=$TMPDIR/pip
+export XDG_CACHE_HOME=$TMPDIR/xdg
+
+mkdir -p \
+  $TRITON_CACHE_DIR \
+  $TORCHINDUCTOR_CACHE_DIR \
+  $TORCH_EXTENSIONS_DIR \
+  $VLLM_CACHE_ROOT \
+  $PIP_CACHE_DIR \
+  $XDG_CACHE_HOME
+
 ###############################################################################
 # 1 · User-configurable parameters (override with environment variables)
 ###############################################################################
@@ -162,7 +180,7 @@ sparc --api-key "$OPENAI_API_KEY" \
       --base-url "$OPENAI_API_BASE" \
       --model "$MODEL" \
       --results-file ${MODEL##*/} \
-      --batch-size 20 \
+      --batch-size 100 \
       "${VISUAL_ARGS[@]}" \
       "$@"
 
