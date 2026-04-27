@@ -62,7 +62,42 @@ def build_sparc_reward_functions(
         )
         prompt_to_puzzle[prompt_text] = example
 
+    # Robust id-based mapping (avoids collisions in vision mode where prompt text is identical)
+    id_to_puzzle: Dict[int, Dict[str, Any]] = {i: ex for i, ex in enumerate(original_examples)}
+
     is_main = PartialState().is_main_process
+
+    def _get_puzzle_for_item(i: int, prompt_text: str, kwargs: Dict[str, Any]):
+        """Resolve puzzle for item i using stable id first, then fallbacks."""
+        # TRL forwards dataset columns through kwargs as batched lists; try several likely keys
+        sid = None
+        for k in ("sample_id", "id", "idx", "__index_level_0__"):
+            v = kwargs.get(k, None)
+            if isinstance(v, list):
+                if i < len(v):
+                    sid = v[i]
+                    break
+            elif v is not None:
+                sid = v
+                break
+
+        if sid is not None:
+            try:
+                puzzle = id_to_puzzle.get(int(sid))
+                if puzzle is not None:
+                    return puzzle
+            except Exception:
+                pass
+
+        # Optional direct pass-through from dataset column if present
+        pz = kwargs.get("puzzle_data", None)
+        if isinstance(pz, list) and i < len(pz) and isinstance(pz[i], dict):
+            return pz[i]
+        if isinstance(pz, dict):
+            return pz
+
+        # Last resort fallback (fragile; can collide in vision mode)
+        return prompt_to_puzzle.get(prompt_text)
 
     def _normalize_texts(completion, prompt):
         if isinstance(prompt, list) and len(prompt) > 0 and isinstance(prompt[0], dict):
@@ -88,10 +123,12 @@ def build_sparc_reward_functions(
     # 1) Perfect solution reward (1.0 if fully correct, else 0.0)
     def reward_perfect_solution(completions, prompts, **kwargs):
         rewards_local: List[float] = []
-        for completion, prompt in zip(completions, prompts):
+        missing = 0
+        for i, (completion, prompt) in enumerate(zip(completions, prompts)):
             prompt_text, completion_text = _normalize_texts(completion, prompt)
-            puzzle = prompt_to_puzzle.get(prompt_text)
+            puzzle = _get_puzzle_for_item(i, prompt_text, kwargs)
             if puzzle is None:
+                missing += 1
                 rewards_local.append(0.0)
                 continue
             try:
@@ -103,7 +140,10 @@ def build_sparc_reward_functions(
             except Exception:
                 rewards_local.append(0.0)
         if is_main and len(rewards_local) > 0 and wandb.run is not None:
-            wandb.log({"rewards/perfect_mean": sum(rewards_local) / len(rewards_local)})
+            wandb.log({
+                "rewards/perfect_mean": sum(rewards_local) / len(rewards_local),
+                "debug/reward_missing_puzzle_frac": missing / len(rewards_local),
+            })
         return rewards_local
 
     # Helper to compute analysis dict safely
@@ -132,9 +172,9 @@ def build_sparc_reward_functions(
     # 2) Starts at start and ends at exit (0.25)
     def reward_starts_and_ends(completions, prompts, **kwargs):
         rewards_local: List[float] = []
-        for completion, prompt in zip(completions, prompts):
+        for i, (completion, prompt) in enumerate(zip(completions, prompts)):
             prompt_text, completion_text = _normalize_texts(completion, prompt)
-            puzzle = prompt_to_puzzle.get(prompt_text)
+            puzzle = _get_puzzle_for_item(i, prompt_text, kwargs)
             if puzzle is None:
                 rewards_local.append(0.0)
                 continue
@@ -148,9 +188,9 @@ def build_sparc_reward_functions(
     # 3) Connected line (0.25)
     def reward_connected_line(completions, prompts, **kwargs):
         rewards_local: List[float] = []
-        for completion, prompt in zip(completions, prompts):
+        for i, (completion, prompt) in enumerate(zip(completions, prompts)):
             prompt_text, completion_text = _normalize_texts(completion, prompt)
-            puzzle = prompt_to_puzzle.get(prompt_text)
+            puzzle = _get_puzzle_for_item(i, prompt_text, kwargs)
             if puzzle is None:
                 rewards_local.append(0.0)
                 continue
@@ -164,9 +204,9 @@ def build_sparc_reward_functions(
     # 4) Non-intersecting line (0.25)
     def reward_non_intersecting(completions, prompts, **kwargs):
         rewards_local: List[float] = []
-        for completion, prompt in zip(completions, prompts):
+        for i, (completion, prompt) in enumerate(zip(completions, prompts)):
             prompt_text, completion_text = _normalize_texts(completion, prompt)
-            puzzle = prompt_to_puzzle.get(prompt_text)
+            puzzle = _get_puzzle_for_item(i, prompt_text, kwargs)
             if puzzle is None:
                 rewards_local.append(0.0)
                 continue
@@ -180,9 +220,9 @@ def build_sparc_reward_functions(
     # 5) No rule crossing (0.25)
     def reward_no_rule_crossing(completions, prompts, **kwargs):
         rewards_local: List[float] = []
-        for completion, prompt in zip(completions, prompts):
+        for i, (completion, prompt) in enumerate(zip(completions, prompts)):
             prompt_text, completion_text = _normalize_texts(completion, prompt)
-            puzzle = prompt_to_puzzle.get(prompt_text)
+            puzzle = _get_puzzle_for_item(i, prompt_text, kwargs)
             if puzzle is None:
                 rewards_local.append(0.0)
                 continue
@@ -196,9 +236,9 @@ def build_sparc_reward_functions(
     # 6) Format hint reward (small reward for emitting expected format when path not valid)
     def reward_format_hint(completions, prompts, **kwargs):
         rewards_local: List[float] = []
-        for completion, prompt in zip(completions, prompts):
+        for i, (completion, prompt) in enumerate(zip(completions, prompts)):
             prompt_text, completion_text = _normalize_texts(completion, prompt)
-            puzzle = prompt_to_puzzle.get(prompt_text)
+            puzzle = _get_puzzle_for_item(i, prompt_text, kwargs)
             if puzzle is not None and _is_perfect(completion_text, puzzle):
                 rewards_local.append(0.0)
                 continue
@@ -224,7 +264,7 @@ def to_grpo_prompt_format(
     use_vision_variant: bool = False,
     vision_plot_type: str = "original",
 ) -> Dataset:
-    def _map_fn(ex):
+    def _map_fn(ex, idx):
         prompt = _build_prompt_text(
             ex,
             use_vision_variant=use_vision_variant,
@@ -238,6 +278,7 @@ def to_grpo_prompt_format(
             "Do not include any extra text outside the final path line."
         )
         out = {
+            "sample_id": idx,
             "prompt": [
                 {"role": "system", "content": system_msg},
                 {"role": "user", "content": prompt},
@@ -252,7 +293,7 @@ def to_grpo_prompt_format(
             )
         return out
 
-    return dataset.map(_map_fn)
+    return dataset.map(_map_fn, with_indices=True)
 
 
 def main():
