@@ -62,13 +62,21 @@ def build_sparc_reward_functions(
         )
         prompt_to_puzzle[prompt_text] = example
 
-    # Robust id-based mapping (avoids collisions in vision mode where prompt text is identical)
+    # Robust id-based mapping (avoids collisions in vision mode where prompt text is identical).
+    # Keys are positions within original_examples (the list passed to this function).
     id_to_puzzle: Dict[int, Dict[str, Any]] = {i: ex for i, ex in enumerate(original_examples)}
 
     is_main = PartialState().is_main_process
 
     def _get_puzzle_for_item(i: int, prompt_text: str, kwargs: Dict[str, Any]):
-        """Resolve puzzle for item i using stable id first, then fallbacks."""
+        """Resolve puzzle for completion index i.
+
+        Fallback order:
+          1. Stable integer ID from kwargs (keys: sample_id, id, idx, __index_level_0__)
+             mapped via id_to_puzzle.  Returns Optional[Dict[str, Any]].
+          2. Direct puzzle dict from kwargs['puzzle_data'] list/scalar.
+          3. prompt_to_puzzle text-key fallback (fragile; can collide in vision mode).
+        """
         # TRL forwards dataset columns through kwargs as batched lists; try several likely keys
         sid = None
         for k in ("sample_id", "id", "idx", "__index_level_0__"):
@@ -86,7 +94,7 @@ def build_sparc_reward_functions(
                 puzzle = id_to_puzzle.get(int(sid))
                 if puzzle is not None:
                     return puzzle
-            except Exception:
+            except (ValueError, TypeError):
                 pass
 
         # Optional direct pass-through from dataset column if present
@@ -265,6 +273,8 @@ def to_grpo_prompt_format(
     vision_plot_type: str = "original",
 ) -> Dataset:
     def _map_fn(ex, idx):
+        # idx is the row position within the dataset, provided by with_indices=True below.
+        # It is stored as sample_id so reward functions can do stable id-based puzzle lookup.
         prompt = _build_prompt_text(
             ex,
             use_vision_variant=use_vision_variant,
