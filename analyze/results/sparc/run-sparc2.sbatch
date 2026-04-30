@@ -25,7 +25,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:A100:4
-#SBATCH --time=48:00:00
+#SBATCH --time=18:00:00
 #SBATCH --mem=128G
 #SBATCH -c 32
 #SBATCH --output=logs/%x-%j.out
@@ -181,6 +181,7 @@ sparc --api-key "$OPENAI_API_KEY" \
       --model "$MODEL" \
       --results-file ${MODEL##*/} \
       --batch-size 100 \
+      --prompt single_shot_visual_prompt_engineering \
       "${VISUAL_ARGS[@]}" \
       "$@"
 
