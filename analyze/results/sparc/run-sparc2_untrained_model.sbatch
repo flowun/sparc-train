@@ -179,7 +179,7 @@ echo "Running sparc client (visual mode: $VISUAL_MODE)..."
 sparc --api-key "$OPENAI_API_KEY" \
       --base-url "$OPENAI_API_BASE" \
       --model "$MODEL" \
-      --results-file ${MODEL##*/}_untrained \
+      --results-file ${MODEL##*/}${VISION_PLOT_TYPE:+_${VISION_PLOT_TYPE}}_untrained \
       --batch-size 100 \
       "${VISUAL_ARGS[@]}" \
       "$@"
